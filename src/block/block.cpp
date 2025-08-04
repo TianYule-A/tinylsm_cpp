@@ -1,26 +1,87 @@
 #include "../../include/block/block.h"
-#include "../../include/block/block_iterator.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
+#include "../../include/block/block_iterator.h"
 
 namespace tiny_lsm {
 Block::Block(size_t capacity) : capacity(capacity) {}
 
-std::vector<uint8_t> Block::encode() {
-  // TODO Lab 3.1 编码单个类实例形成一段字节数组
-  return {};
+std::vector<uint8_t> Block::encode(bool with_hash) {
+  // (done)TODO Lab 3.1 编码单个类实例形成一段字节数组
+  size_t total_bytes = cur_size();
+  if (with_hash) {
+    total_bytes += sizeof(uint32_t);  // 为hash值预留空间
+  }
+
+  std::vector<uint8_t> encoded(total_bytes, 0);
+  size_t n_pos = 0;  // 当前写入偏移
+  // 写入entry数据
+  auto data_ptr = encoded.data();
+  memcpy(data_ptr, data.data(), data.size());
+  // 写入偏移数组
+  n_pos += data.size();
+  memcpy(data_ptr + n_pos, offsets.data(), offsets.size() * sizeof(uint16_t));
+  // 写入元素个数
+  n_pos += offsets.size() * sizeof(uint16_t);
+  uint16_t num_elements = static_cast<uint16_t>(offsets.size());
+  memcpy(data_ptr + n_pos, &num_elements, sizeof(uint16_t));
+
+  if (with_hash) {
+    // 计算hash值,使用数据+偏移大小进行hash
+    std::hash<std::string_view> hash_func;
+    uint32_t hash_value = hash_func(std::string_view(reinterpret_cast<const char *>(data_ptr), n_pos));
+    memcpy(data_ptr + n_pos + sizeof(uint16_t), &hash_value, sizeof(uint32_t));
+  }
+
+  return encoded;
 }
 
-std::shared_ptr<Block> Block::decode(const std::vector<uint8_t> &encoded,
-                                     bool with_hash) {
-  // TODO Lab 3.1 解码字节数组形成类实例
-  return nullptr;
+std::shared_ptr<Block> Block::decode(const std::vector<uint8_t> &encoded, bool with_hash) {
+  // (done)TODO Lab 3.1 解码字节数组形成类实例
+  auto block_ptr = std::make_shared<Block>();
+  if (encoded.size() <= sizeof(uint16_t) + sizeof(uint32_t)) {
+    throw std::runtime_error("Encoded data is too small to decode");
+  }
+  size_t n_pos = encoded.size();
+  auto encoded_data_ptr = encoded.data();
+  if (with_hash) {
+    // hash校验
+    n_pos -= sizeof(uint32_t);
+    uint32_t hash_value;
+    memcpy(&hash_value, encoded_data_ptr + n_pos, sizeof(uint32_t));
+    std::hash<std::string_view> hash_func;
+    uint32_t expected_hash =
+        hash_func(std::string_view(reinterpret_cast<const char *>(encoded_data_ptr), n_pos - sizeof(uint16_t)));
+    if (hash_value != expected_hash) {
+      throw std::runtime_error("Block decode: Hash mismatch");
+    }
+  }
+  // 读取元素个数
+  n_pos -= sizeof(uint16_t);
+  uint16_t num_elements;
+  memcpy(&num_elements, encoded_data_ptr + n_pos, sizeof(uint16_t));
+  if (num_elements == 0) {
+    return block_ptr;  // 空block
+  }
+  // 读取偏移数组
+  n_pos -= num_elements * sizeof(uint16_t);
+  block_ptr->offsets.resize(num_elements);
+  memcpy(block_ptr->offsets.data(), encoded_data_ptr + n_pos, num_elements * sizeof(uint16_t));
+
+  // 读取数据
+  block_ptr->data.resize(n_pos);
+  memcpy(block_ptr->data.data(), encoded_data_ptr, n_pos);
+
+  return block_ptr;
 }
 
 std::string Block::get_first_key() {
@@ -33,8 +94,7 @@ std::string Block::get_first_key() {
   memcpy(&key_len, data.data(), sizeof(uint16_t));
 
   // 读取key
-  std::string key(reinterpret_cast<char *>(data.data() + sizeof(uint16_t)),
-                  key_len);
+  std::string key(reinterpret_cast<char *>(data.data() + sizeof(uint16_t)), key_len);
   return key;
 }
 
@@ -45,34 +105,75 @@ size_t Block::get_offset_at(size_t idx) const {
   return offsets[idx];
 }
 
-bool Block::add_entry(const std::string &key, const std::string &value,
-                      uint64_t tranc_id, bool force_write) {
-  // TODO Lab 3.1 添加一个键值对到block中
+bool Block::add_entry(const std::string &key, const std::string &value, uint64_t tranc_id, bool force_write) {
+  // (done)TODO Lab 3.1 添加一个键值对到block中
   // ? 返回值说明：
   // ? true: 成功添加
   // ? false: block已满, 拒绝此次添加
-  return false;
+  size_t entry_size = sizeof(uint16_t) * 2 + key.size() + value.size() + sizeof(uint64_t);
+  size_t total_bytes = cur_size() + entry_size;
+  if (total_bytes > capacity && !force_write) {
+    return false;  // block已满且不强制写入
+  }
+  uint16_t new_entry_offset = static_cast<uint16_t>(data.size());
+  // 写入entry数据
+  data.resize(data.size() + entry_size);
+  auto data_ptr = data.data() + new_entry_offset;
+  uint16_t key_len = static_cast<uint16_t>(key.size());
+  uint16_t value_len = static_cast<uint16_t>(value.size());
+  memcpy(data_ptr, &key_len, sizeof(uint16_t));
+  memcpy(data_ptr + sizeof(uint16_t), key.data(), key.size());
+  memcpy(data_ptr + sizeof(uint16_t) + key.size(), &value_len, sizeof(uint16_t));
+  memcpy(data_ptr + sizeof(uint16_t) + key.size() + sizeof(uint16_t), value.data(), value.size());
+  memcpy(data_ptr + sizeof(uint16_t) + key.size() + sizeof(uint16_t) + value.size(), &tranc_id, sizeof(uint64_t));
+  offsets.push_back(new_entry_offset);
+  return true;
 }
 
 // 从指定偏移量获取entry的key
 std::string Block::get_key_at(size_t offset) const {
-  // TODO Lab 3.1 从指定偏移量获取entry的key
-  return "";
+  // (done)TODO Lab 3.1 从指定偏移量获取entry的key
+  // 先读取长度
+  uint16_t key_len;
+  memcpy(&key_len, data.data() + offset, sizeof(uint16_t));
+
+  // 读取key
+  std::string key(reinterpret_cast<const char *>(data.data() + offset + sizeof(uint16_t)), key_len);
+  return key;
 }
 
 // 从指定偏移量获取entry的value
 std::string Block::get_value_at(size_t offset) const {
-  // TODO Lab 3.1 从指定偏移量获取entry的value
-  return "";
+  // (done)TODO Lab 3.1 从指定偏移量获取entry的value
+  uint16_t key_len;
+  memcpy(&key_len, data.data() + offset, sizeof(uint16_t));
+  // 读取value长度
+  uint16_t value_len;
+  size_t value_len_offset = offset + sizeof(uint16_t) + key_len;
+  memcpy(&value_len, data.data() + value_len_offset, sizeof(uint16_t));
+  // 读取value
+  std::string value(reinterpret_cast<const char *>(data.data() + value_len_offset + sizeof(uint16_t)), value_len);
+  return value;
 }
 
-uint16_t Block::get_tranc_id_at(size_t offset) const {
-  // TODO Lab 3.1 从指定偏移量获取entry的tranc_id
+uint64_t Block::get_tranc_id_at(size_t offset) const {
+  // (done)TODO Lab 3.1 从指定偏移量获取entry的tranc_id
   // ? 你不需要理解tranc_id的具体含义, 直接返回即可
-  return 0;
+  uint16_t key_len;
+  memcpy(&key_len, data.data() + offset, sizeof(uint16_t));
+  // 读取value长度
+  uint16_t value_len;
+  size_t value_len_offset = offset + sizeof(uint16_t) + key_len;
+  memcpy(&value_len, data.data() + value_len_offset, sizeof(uint16_t));
+  // 读取tranc_id
+  uint64_t tranc_id;
+  size_t tranc_id_offset = value_len_offset + sizeof(uint16_t) + value_len;
+  memcpy(&tranc_id, data.data() + tranc_id_offset, sizeof(uint64_t));
+  return tranc_id;
 }
 
 // 比较指定偏移量处的key与目标key
+// <0: offset小于目标key
 int Block::compare_key_at(size_t offset, const std::string &target) const {
   std::string key = get_key_at(offset);
   return key.compare(target);
@@ -83,20 +184,32 @@ int Block::compare_key_at(size_t offset, const std::string &target) const {
 int Block::adjust_idx_by_tranc_id(size_t idx, uint64_t tranc_id) {
   // TODO Lab3.1 不需要在Lab3.1中实现, 只是进行标记,
   // ? 后续实现事务后需要更新这里的实现
+  if (idx >= offsets.size()) {
+    return -1;  // 索引超出范围
+  }
+  // 如果没有开启事务，选择事务id最大的返回
+  auto target_key = get_key_at(offsets[idx]);
+  if (tranc_id == 0) {
+    auto pre_idx = idx;
+    // 向前查找直到找到第一个不同的key
+    while (pre_idx > 0 && is_same_key(pre_idx - 1, target_key)) {
+      pre_idx--;
+    }
+    return pre_idx;
+  }
   return -1;
 }
 
 bool Block::is_same_key(size_t idx, const std::string &target_key) const {
   if (idx >= offsets.size()) {
-    return false; // 索引超出范围
+    return false;  // 索引超出范围
   }
   return get_key_at(offsets[idx]) == target_key;
 }
 
 // 使用二分查找获取value
 // 要求在插入数据时有序插入
-std::optional<std::string> Block::get_value_binary(const std::string &key,
-                                                   uint64_t tranc_id) {
+std::optional<std::string> Block::get_value_binary(const std::string &key, uint64_t tranc_id) {
   auto idx = get_idx_binary(key, tranc_id);
   if (!idx.has_value()) {
     return std::nullopt;
@@ -105,17 +218,83 @@ std::optional<std::string> Block::get_value_binary(const std::string &key,
   return get_value_at(offsets[*idx]);
 }
 
-std::optional<size_t> Block::get_idx_binary(const std::string &key,
-                                            uint64_t tranc_id) {
-  // TODO Lab 3.1 使用二分查找获取key对应的索引
+std::optional<size_t> Block::get_idx_binary(const std::string &key, uint64_t tranc_id) {
+  // (done)TODO Lab 3.1 使用二分查找获取key对应的索引
+  if (offsets.empty()) {
+    return std::nullopt;  // 空block
+  }
+  int left = 0;
+  int right = offsets.size() - 1;
+  //   if (compare_key_at(offsets[left], key) > 0 || compare_key_at(offsets[right], key) < 0) {
+  //     return std::nullopt;  // key不在范围内
+  //   }
+  while (left <= right) {
+    int mid = left + (right - left) / 2;
+    size_t mid_offset = offsets[mid];
+    int cmp = compare_key_at(mid_offset, key);
+
+    if (cmp == 0) {
+      // 找到匹配的key
+      // TODO:还需要判断事务id可见性,
+      // 暂时忽略(?为什么还有事务可见性，一个mem_table中key应该是唯一的，除非构建sst-block时，写入了多个mem_table)
+      auto new_mid = adjust_idx_by_tranc_id(mid, tranc_id);
+      if (new_mid == -1) {
+        return std::nullopt;
+      }
+      return new_mid;
+    } else if (cmp < 0) {
+      // key在右侧
+      left = mid + 1;
+    } else {
+      // key在左侧
+      right = mid - 1;
+    }
+  }
+
   return std::nullopt;
 }
 
-std::optional<
-    std::pair<std::shared_ptr<BlockIterator>, std::shared_ptr<BlockIterator>>>
-Block::iters_preffix(uint64_t tranc_id, const std::string &preffix) {
+std::optional<std::pair<std::shared_ptr<BlockIterator>, std::shared_ptr<BlockIterator>>> Block::iters_preffix(
+    uint64_t tranc_id, const std::string &preffix) {
   // TODO Lab 3.3 获取前缀匹配的区间迭代器
-  return std::nullopt;
+  // 左闭右开区间
+  if (offsets.empty()) {
+    return std::nullopt;  // 空block
+  }
+  size_t left = 0;
+  size_t right = offsets.size() - 1;
+  // 二分查找左边界left
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    size_t mid_offset = offsets[mid];
+    int cmp = compare_key_at(mid_offset, preffix);
+    if (cmp < 0) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+  // 二分查找右边界right+1
+  right = offsets.size() - 1;
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    size_t mid_offset = offsets[mid];
+    int cmp = compare_key_at(mid_offset, preffix);
+    if (cmp > 0) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+
+  if (left > right) {
+    // 没有找到匹配的前缀
+    return std::nullopt;
+  }
+  // 返回前缀匹配的区间迭代器
+  auto begin_iter = std::make_shared<BlockIterator>(shared_from_this(), offsets[left], tranc_id);
+  auto end_iter = std::make_shared<BlockIterator>(shared_from_this(), offsets[right + 1], tranc_id);
+  return std::make_pair(begin_iter, end_iter);
 }
 
 // 返回第一个满足谓词的位置和最后一个满足谓词的位置
@@ -126,12 +305,53 @@ Block::iters_preffix(uint64_t tranc_id, const std::string &preffix) {
 //   0: 满足谓词
 //   >0: 不满足谓词, 需要向右移动
 //   <0: 不满足谓词, 需要向左移动
-std::optional<
-    std::pair<std::shared_ptr<BlockIterator>, std::shared_ptr<BlockIterator>>>
-Block::get_monotony_predicate_iters(
-    uint64_t tranc_id, std::function<int(const std::string &)> predicate) {
+std::optional<std::pair<std::shared_ptr<BlockIterator>, std::shared_ptr<BlockIterator>>>
+Block::get_monotony_predicate_iters(uint64_t tranc_id, std::function<int(const std::string &)> predicate) {
   // TODO: Lab 3.3 使用二分查找获取满足谓词的区间迭代器
-  return std::nullopt;
+  if (offsets.empty()) {
+    return std::nullopt;  // 空block
+  }
+  // 左右边界
+  size_t left_bound = 0;
+  size_t right_bound = 0;
+  size_t left = 0;
+  size_t right = offsets.size() - 1;
+  // 二分查找左边界left
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    size_t mid_offset = offsets[mid];
+    std::string key = get_key_at(mid_offset);
+    int cmp = predicate(key);
+    if (cmp <= 0) {
+      right = mid - 1;  // 向左移动
+    } else {
+      left = mid + 1;  // 向右移动
+    }
+  }
+  left_bound = left;  // 左边界
+  // 二分查找右边界right+1
+  right = offsets.size() - 1;
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    size_t mid_offset = offsets[mid];
+    std::string key = get_key_at(mid_offset);
+    int cmp = predicate(key);
+    if (cmp >= 0) {
+      left = mid + 1;  // 向右移动
+    } else {
+      right = mid - 1;  // 向左移动
+    }
+  }
+  right_bound = right + 1;  // 右边界
+  if (left_bound > right_bound) {
+    // 没有找到满足谓词的区间
+    return std::nullopt;
+  }
+
+  // 返回满足谓词的区间迭代器
+  auto begin_iter = std::make_shared<BlockIterator>(shared_from_this(), left_bound, tranc_id);
+  auto end_iter = std::make_shared<BlockIterator>(shared_from_this(), right_bound, tranc_id);
+  return std::make_pair(begin_iter, end_iter);
 }
 
 Block::Entry Block::get_entry_at(size_t offset) const {
@@ -144,19 +364,17 @@ Block::Entry Block::get_entry_at(size_t offset) const {
 
 size_t Block::size() const { return offsets.size(); }
 
-size_t Block::cur_size() const {
-  return data.size() + offsets.size() * sizeof(uint16_t) + sizeof(uint16_t);
-}
+size_t Block::cur_size() const { return data.size() + offsets.size() * sizeof(uint16_t) + sizeof(uint16_t); }
 
 bool Block::is_empty() const { return offsets.empty(); }
 
 BlockIterator Block::begin(uint64_t tranc_id) {
   // TODO Lab 3.2 获取begin迭代器
-  return BlockIterator(nullptr, 0, 0);
+  return BlockIterator(shared_from_this(), 0, tranc_id);
 }
 
 BlockIterator Block::end() {
   // TODO Lab 3.2 获取end迭代器
-  return BlockIterator(nullptr, 0, 0);
+  return BlockIterator(shared_from_this(), offsets.size(), 0);
 }
-} // namespace tiny_lsm
+}  // namespace tiny_lsm

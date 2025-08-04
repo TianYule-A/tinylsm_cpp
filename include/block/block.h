@@ -12,11 +12,11 @@
 /***
 Refer to https://skyzh.github.io/mini-lsm/week1-03-block.html for memory layout
 
------------------------------------------------------------------------------
-|             Data Section           |      Offset Section |     Extra      |
------------------------------------------------------------------------------
-|Entry#1|Entry#2|...|Entry#N|Offset#1|Offset#2|...|Offset#N|num_of_elements |
------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+|             Data Section  |      Offset Section          |     Extra         |
+--------------------------------------------------------------------------------
+|Entry#1|Entry#2|...|Entry#N|Offset#1|Offset#2|...|Offset#N|num_of_elements(2B)|
+--------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------
 |                           Entry #1 |                          ... |
@@ -45,7 +45,7 @@ private:
   Entry get_entry_at(size_t offset) const;
   std::string get_key_at(size_t offset) const;
   std::string get_value_at(size_t offset) const;
-  uint16_t get_tranc_id_at(size_t offset) const;
+  uint64_t get_tranc_id_at(size_t offset) const;
   int compare_key_at(size_t offset, const std::string &target) const;
 
   // 根据id的可见性调整位置
@@ -56,8 +56,8 @@ private:
 public:
   Block() = default;
   Block(size_t capacity);
-  // ! 这里的编码函数不包括 hash
-  std::vector<uint8_t> encode();
+  // ! 这里的编码函数不包括 hash (已补充hash)
+  std::vector<uint8_t> encode(bool with_hash = false);
   // ! 这里的解码函数可指定切片是否包括 hash
   static std::shared_ptr<Block> decode(const std::vector<uint8_t> &encoded,
                                        bool with_hash = false);
@@ -68,7 +68,9 @@ public:
   std::optional<std::string> get_value_binary(const std::string &key,
                                               uint64_t tranc_id);
 
+  // 元素个数
   size_t size() const;
+  // 获取当前block的实际总字节数
   size_t cur_size() const;
   bool is_empty() const;
   std::optional<size_t> get_idx_binary(const std::string &key,

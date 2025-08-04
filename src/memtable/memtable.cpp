@@ -29,7 +29,7 @@ void MemTable::put_(const std::string &key, const std::string &value, uint64_t t
 }
 
 void MemTable::put(const std::string &key, const std::string &value, uint64_t tranc_id) {
-  // TODO: Lab2.1 有锁版本的 put
+  // (done)TODO: Lab2.1 有锁版本的 put
   spdlog::trace("MemTable--put({}, {}, {})", key, value, tranc_id);
   std::unique_lock<std::shared_mutex> lock(cur_mtx);
   put_(key, value, tranc_id);
@@ -43,7 +43,7 @@ void MemTable::put(const std::string &key, const std::string &value, uint64_t tr
 }
 
 void MemTable::put_batch(const std::vector<std::pair<std::string, std::string>> &kvs, uint64_t tranc_id) {
-  // TODO: Lab2.1 有锁版本的 put_batch
+  // (done)TODO: Lab2.1 有锁版本的 put_batch
   // ? tranc_id 参数可暂时忽略其逻辑判断, 直接插入即可
   std::unique_lock<std::shared_mutex> lock(cur_mtx);
   for (const auto &[key, value] : kvs) {
@@ -60,7 +60,7 @@ void MemTable::put_batch(const std::vector<std::pair<std::string, std::string>> 
 
 SkipListIterator MemTable::cur_get_(const std::string &key, uint64_t tranc_id) {
   // 检查当前活跃的memtable
-  // TODO: Lab2.1 从活跃跳表中查o
+  // (done)TODO: Lab2.1 从活跃跳表中查o
   auto res = current_table->get(key, tranc_id);
   if (res.is_valid()) {
     return res;
@@ -69,7 +69,7 @@ SkipListIterator MemTable::cur_get_(const std::string &key, uint64_t tranc_id) {
 }
 
 SkipListIterator MemTable::frozen_get_(const std::string &key, uint64_t tranc_id) {
-  // TODO: Lab2.1 从冻结跳表中查询
+  // (done)TODO: Lab2.1 从冻结跳表中查询
   // ? 你需要尤其注意跳表的遍历顺序
   // ? tranc_id 参数可暂时忽略, 直接传递参数即可
   for (const auto &table : frozen_tables) {
@@ -82,7 +82,7 @@ SkipListIterator MemTable::frozen_get_(const std::string &key, uint64_t tranc_id
 }
 
 SkipListIterator MemTable::get(const std::string &key, uint64_t tranc_id) {
-  // TODO: Lab2.1 查询, 建议复用 cur_get_ 和 frozen_get_
+  // (done)TODO: Lab2.1 查询, 建议复用 cur_get_ 和 frozen_get_
   // ? 注意并发控制
   spdlog::trace("MemTable--get({}, {})", key, tranc_id);
   // 查找路径 current_table -> frozen_tables -> SST
@@ -103,7 +103,7 @@ SkipListIterator MemTable::get(const std::string &key, uint64_t tranc_id) {
 }
 
 SkipListIterator MemTable::get_(const std::string &key, uint64_t tranc_id) {
-  // TODO: Lab2.1 查询, 无锁版本
+  // (done)TODO: Lab2.1 查询, 无锁版本
   spdlog::trace("MemTable--get_({}, {})", key, tranc_id);
   // 查找路径 current_table -> frozen_tables -> SST
   auto cur_res = cur_get_(key, tranc_id);
@@ -293,7 +293,7 @@ size_t MemTable::get_total_size() {
 }
 
 HeapIterator MemTable::begin(uint64_t tranc_id) {
-  // TODO Lab 2.2 MemTable 的迭代器
+  // (done)TODO Lab 2.2 MemTable 的迭代器
   std::shared_lock<std::shared_mutex> slock(cur_mtx);
   std::vector<SearchItem> item_vec;
   // 从当前表获取数据
@@ -313,12 +313,12 @@ HeapIterator MemTable::begin(uint64_t tranc_id) {
 }
 
 HeapIterator MemTable::end() {
-  // TODO Lab 2.2 MemTable 的迭代器
+  // (done)TODO Lab 2.2 MemTable 的迭代器
   return HeapIterator{};
 }
 
 HeapIterator MemTable::iters_preffix(const std::string &preffix, uint64_t tranc_id) {
-  // TODO Lab 2.3 MemTable 的前缀迭代器
+  // (done)TODO Lab 2.3 MemTable 的前缀迭代器
   // 调用跳表的前缀查询，找到前缀范围的起始和终止位置迭代器
   int table_idx = 0;
   std::vector<SearchItem> item_vec;
@@ -344,7 +344,7 @@ HeapIterator MemTable::iters_preffix(const std::string &preffix, uint64_t tranc_
 
 std::optional<std::pair<HeapIterator, HeapIterator>> MemTable::iters_monotony_predicate(
     uint64_t tranc_id, std::function<int(const std::string &)> predicate) {
-  // TODO Lab 2.3 MemTable 的谓词查询迭代器起始范围
+  // (done)TODO Lab 2.3 MemTable 的谓词查询迭代器起始范围
   int table_idx = 0;
   std::vector<SearchItem> item_vec;
   std::shared_lock<std::shared_mutex> slock(cur_mtx);
